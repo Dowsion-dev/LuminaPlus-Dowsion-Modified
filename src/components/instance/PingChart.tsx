@@ -425,23 +425,32 @@ export function PingChart({
           ctx.beginPath();
           ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
           ctx.clip();
-          ctx.strokeStyle = isDark ? "#fb7185" : "#e11d48";
           ctx.globalAlpha = 0.75;
           ctx.lineWidth = ratio;
-          ctx.setLineDash([4 * ratio, 4 * ratio]);
-          ctx.beginPath();
-          // 同一像素列只画一次，长时间范围的大量丢包不会重复叠色。
-          const columns = new Set<number>();
-          for (const time of lossMarkers) {
+          // 按任务去重；同一像素列的多任务丢包交错绘制，避免颜色互相覆盖。
+          const columns = new Map<number, Set<number>>();
+          for (const { time, taskId } of lossMarkers) {
             if (time < (u.scales.x.min ?? -Infinity) || time > (u.scales.x.max ?? Infinity)) continue;
             const x = Math.max(bbox.left + ratio / 2, Math.min(bbox.left + bbox.width - ratio / 2,
               Math.round(u.valToPos(time, "x", true))));
-            if (columns.has(x)) continue;
-            columns.add(x);
-            ctx.moveTo(x, bbox.top);
-            ctx.lineTo(x, bbox.top + bbox.height);
+            const taskIds = columns.get(x) ?? new Set<number>();
+            taskIds.add(taskId);
+            columns.set(x, taskIds);
           }
-          ctx.stroke();
+          for (const [x, taskIds] of columns) {
+            const orderedIds = [...taskIds].sort((a, b) =>
+              (taskIndexById.get(a) ?? 0) - (taskIndexById.get(b) ?? 0));
+            orderedIds.forEach((taskId, index) => {
+              ctx.strokeStyle = taskColors.get(taskId)
+                ?? colorForSeries(taskIndexById.get(taskId) ?? 0, tasks.length);
+              ctx.setLineDash([4 * ratio, (8 * orderedIds.length - 4) * ratio]);
+              ctx.lineDashOffset = -index * 8 * ratio;
+              ctx.beginPath();
+              ctx.moveTo(x, bbox.top);
+              ctx.lineTo(x, bbox.top + bbox.height);
+              ctx.stroke();
+            });
+          }
           ctx.restore();
         }],
         init: [
@@ -620,11 +629,6 @@ export function PingChart({
         </button>
       </div>
 
-      {chartMetric === "latency" && (
-        <div className="instance-ping-loss-legend">
-          <span aria-hidden /> 竖向虚线表示丢包（含聚合时间段内的部分丢包）
-        </div>
-      )}
       <div className="instance-ping-tasks">
         {taskStats.map((task) => {
           const visible = !hiddenTasks.has(task.id);

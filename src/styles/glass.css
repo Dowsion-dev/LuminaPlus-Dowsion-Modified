@@ -43,21 +43,3 @@
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   :root { --surface-alpha: 96; }
 }
-
-.instance-ping-loss-legend {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 10px;
-  color: var(--text-secondary);
-  font-size: 11px;
-}
-
-.instance-ping-loss-legend > span {
-  height: 14px;
-  border-left: 2px dashed #e11d48;
-}
-
-:root[data-appearance="dark"] .instance-ping-loss-legend > span {
-  border-color: #fb7185;
-}

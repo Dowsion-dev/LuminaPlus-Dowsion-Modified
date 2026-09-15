@@ -74,7 +74,7 @@ describe("pingLossMarkers", () => {
       sample(1 + i * hours * 3.6, i === 501 ? -1 : 20,
         i === 802 ? { count: 1000, loss: 0.01 } : {}));
     expect(pingLossMarkers(records, new Set([1])))
-      .toEqual([records[501].time, records[802].time]);
+      .toEqual([{ time: records[501].time, taskId: 1 }, { time: records[802].time, taskId: 1 }]);
   });
 
   it("excludes hidden tasks, invalid times and successes, and deduplicates timestamps", () => {
@@ -82,6 +82,11 @@ describe("pingLossMarkers", () => {
       sample(1, 0), sample(2, -1), sample(2, -1),
       sample(3, -1, { task_id: 2 }),
     ].concat({ time: NaN, record: sample(4, -1).record }), new Set([1])))
-      .toEqual([2]);
+      .toEqual([{ time: 2, taskId: 1 }]);
   });
+});
+
+it("retains both task identities when losses occur at the same timestamp", () => {
+  expect(pingLossMarkers([sample(2, -1), sample(2, -1, { task_id: 2 })], new Set([1, 2])))
+    .toEqual([{ time: 2, taskId: 1 }, { time: 2, taskId: 2 }]);
 });
