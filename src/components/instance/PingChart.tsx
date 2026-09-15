@@ -14,7 +14,7 @@ import {
   type ChartTooltipState,
 } from "./chartShared";
 import { ChartTooltip, SwitchToggle } from "./ChartParts";
-import { alignPingChartRecords } from "./pingChartData";
+import { alignPingChartRecords, pingLossMarkers } from "./pingChartData";
 import {
   cutPeakValues,
   detectTypicalIntervalSeconds,
@@ -195,6 +195,11 @@ export function PingChart({
         .filter(({ time }) => time > 0)
         .sort((left, right) => left.time - right.time),
     [data],
+  );
+
+  const lossMarkers = useMemo(
+    () => pingLossMarkers(sortedRecords, visibleTaskIds),
+    [sortedRecords, visibleTaskIds],
   );
 
   const chartPoints = useMemo(() => {
@@ -412,6 +417,33 @@ export function PingChart({
         })),
       ],
       hooks: {
+        draw: [(u) => {
+          if (chartMetric !== "latency" || !lossMarkers.length) return;
+          const { ctx, bbox } = u;
+          const ratio = u.width > 0 ? ctx.canvas.width / u.width : 1;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
+          ctx.clip();
+          ctx.strokeStyle = isDark ? "#fb7185" : "#e11d48";
+          ctx.globalAlpha = 0.75;
+          ctx.lineWidth = ratio;
+          ctx.setLineDash([4 * ratio, 4 * ratio]);
+          ctx.beginPath();
+          // 同一像素列只画一次，长时间范围的大量丢包不会重复叠色。
+          const columns = new Set<number>();
+          for (const time of lossMarkers) {
+            if (time < (u.scales.x.min ?? -Infinity) || time > (u.scales.x.max ?? Infinity)) continue;
+            const x = Math.max(bbox.left + ratio / 2, Math.min(bbox.left + bbox.width - ratio / 2,
+              Math.round(u.valToPos(time, "x", true))));
+            if (columns.has(x)) continue;
+            columns.add(x);
+            ctx.moveTo(x, bbox.top);
+            ctx.lineTo(x, bbox.top + bbox.height);
+          }
+          ctx.stroke();
+          ctx.restore();
+        }],
         init: [
           (u) => {
             u.root.setAttribute("role", "img");
@@ -426,7 +458,7 @@ export function PingChart({
         setCursor: [tooltipHooks.onSetCursor],
       },
     };
-  }, [chart, chartMetric, connectNulls, hiddenTasks, hours, isDark, requestedXRange, taskColors, taskIndexById, taskLabels, tasks, visibleTasks, yRange]);
+  }, [chart, chartMetric, connectNulls, hiddenTasks, hours, isDark, lossMarkers, requestedXRange, taskColors, taskIndexById, taskLabels, tasks, visibleTasks, yRange]);
 
   const options = useMemo<uPlot.Options | null>(
     () => (baseOptions ? { ...baseOptions, width: w, height: h } : null),
@@ -570,7 +602,7 @@ export function PingChart({
           label="断点连线"
           active={connectNulls}
           onToggle={() => setConnectNulls((value) => !value)}
-          title="关闭：如实显示中断/丢包断点；开启：跨过所有空缺连成完整曲线（更好看，但看不出掉线）。注：偶尔漏一两次采样的小空缺始终自动桥接，不受此开关影响。"
+          title="关闭：如实显示中断/丢包断点；开启：跨过空缺连接曲线，延迟图中的丢包虚线仍保留。注：偶尔漏一两次采样的小空缺始终自动桥接，不受此开关影响。"
         />
         <button type="button" className="instance-toggle-button" onClick={toggleAll}>
           {hiddenTasks.size === 0 ? <EyeOff size={14} aria-hidden /> : <Eye size={14} aria-hidden />}
@@ -588,6 +620,11 @@ export function PingChart({
         </button>
       </div>
 
+      {chartMetric === "latency" && (
+        <div className="instance-ping-loss-legend">
+          <span aria-hidden /> 竖向虚线表示丢包（含聚合时间段内的部分丢包）
+        </div>
+      )}
       <div className="instance-ping-tasks">
         {taskStats.map((task) => {
           const visible = !hiddenTasks.has(task.id);
